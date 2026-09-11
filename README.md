@@ -24,33 +24,59 @@ Designed with direct 1-to-1 fidelity to Diego Ongaro & John Ousterhout's seminal
 
 ## 🏛️ System Architecture
 
+The architecture is cleanly structured into three distinct tiers:
+1. **Interactive Visualizer & Client Layer**: Canvas-based UI and REST/WebSocket client.
+2. **Telemetry & Orchestration Layer**: FastAPI backend managing WebSocket broadcasts and cluster control commands.
+3. **Distributed Raft Core**: Independent `RaftNode` instances communicating via an asynchronous TCP RPC mesh.
+
 ```mermaid
 flowchart TB
-    subgraph Client / UI Layer
-        WebUI[Interactive Web Visualizer\nHTML5 Canvas + Real-Time WebSocket]
-        CLI[Client Command\nSET key=val / DEL key]
+    subgraph UI_Tier["Interactive Client & Visualizer Tier"]
+        Browser["Web Visualizer (Canvas + UI)\nhttp://localhost:8000"]
+        CLI["Client KV Operations\nSET key=val / DEL key"]
     end
 
-    subgraph Monitor Server
-        FastAPI[FastAPI + WebSocket Hub\nmonitor.py :8000]
+    subgraph Monitor_Tier["Telemetry & Orchestration Layer (monitor.py)"]
+        FastAPI["FastAPI App\nREST API Endpoints"]
+        WSHub["WebSocket Hub\nReal-time Event Broadcast"]
+        Harness["RaftCluster Harness\nLifecycle & Fault Controller"]
     end
 
-    subgraph Raft Cluster
-        subgraph Node N
-            RPC[RPCManager\nAsync TCP Framing\nNewline-Delimited JSON]
-            State[RaftState\nPersistent: term, voted_for, log\nVolatile: commit_index, last_applied]
-            SM[State Machine\nIn-Memory Key-Value Store]
-            Node[RaftNode\nRole: Follower / Candidate / Leader\nTimers & Event Loops]
-            Telemetry[Telemetry Observers\non_state_change / on_rpc_event]
+    subgraph Cluster_Tier["Distributed Raft Cluster Mesh (raft/)"]
+        subgraph Node1["Raft Node 1 (Leader)"]
+            N1_Core["RaftNode\nState Machine Loop"]
+            N1_State["RaftState\nterm, log, commitIndex"]
+            N1_SM["KV Store\nState Machine"]
+            N1_RPC["RPCManager\nAsync TCP"]
+        end
+
+        subgraph Node2["Raft Node 2 (Follower)"]
+            N2_Core["RaftNode"]
+            N2_RPC["RPCManager"]
+        end
+
+        subgraph Node3["Raft Node 3 (Follower)"]
+            N3_Core["RaftNode"]
+            N3_RPC["RPCManager"]
         end
     end
 
-    WebUI <-->|WebSocket & REST API| FastAPI
-    CLI -->|execute_command| Node
-    FastAPI <-->|Cluster Harness & Observer Events| Telemetry
-    Node -->|apply committed entries| SM
-    Node <-->|read / write| State
-    Node <-->|send / receive RPCs| RPC
+    Browser <-->|WebSocket Events| WSHub
+    Browser -->|HTTP REST /api/*| FastAPI
+    CLI -->|Execute Command| FastAPI
+
+    FastAPI --> Harness
+    Harness -->|Inject Chaos / Route| Cluster_Tier
+
+    N1_Core <--> N1_State
+    N1_Core -->|Apply Committed| N1_SM
+    N1_Core <--> N1_RPC
+
+    N1_RPC <==>|Async TCP: RequestVote / AppendEntries| N2_RPC
+    N1_RPC <==>|Async TCP: RequestVote / AppendEntries| N3_RPC
+    N2_RPC <==>|Async TCP: RequestVote / AppendEntries| N3_RPC
+
+    Cluster_Tier -.->|Telemetry Event Stream| WSHub
 ```
 
 ### Node State Transitions (Section 5.1 / Figure 4)
@@ -90,7 +116,7 @@ Every component maps directly to the rules and invariants defined in **Figure 2 
 - Install dependencies:
 
 ```powershell
-pip install fastapi uvicorn websockets pytest
+pip install -r requirements.txt
 ```
 
 ### 2. Launch the Interactive Web Visualizer
@@ -129,7 +155,7 @@ tests/
 └── test_step8_monitor.py         # 1 test: Telemetry WebSocket and REST API verification
 ```
 
-### Run All Tests
+### Run All Tests (34 Tests Passing)
 
 ```powershell
 python -m pytest tests/ -v
@@ -157,8 +183,9 @@ python -m pytest tests/ -v
 │   └── style.css          # VS Code-inspired dark aesthetic design system
 ├── tests/                 # Automated testing & chaos validation suite
 │   ├── harness.py         # Multi-node in-memory / local network test cluster
-│   └── test_step*.py      # Phase 1 to Phase 6 test benchmarks
+│   └── test_step*.py      # Phase 1 to Phase 8 test benchmarks
 ├── monitor.py             # FastAPI telemetry server & WebSocket hub
+├── requirements.txt       # Project dependencies
 └── README.md
 ```
 
