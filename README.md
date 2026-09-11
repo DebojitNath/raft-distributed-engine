@@ -1,36 +1,56 @@
-# Distributed Raft Consensus Engine & Chaos Visualizer
+# Distributed Raft Consensus Engine & Real-Time Interactive Visualizer
 
-An explainable, production-grade implementation of the **Raft Distributed Consensus Algorithm** in pure asynchronous Python (`asyncio`), featuring automated chaos engineering benchmarks and real-time state machine telemetry.
+An explainable, production-grade implementation of the **Raft Distributed Consensus Algorithm** in pure asynchronous Python (`asyncio`), featuring an interactive real-time visualizer dashboard, dynamic node scaling, automated chaos engineering benchmarks, and live cluster failure injection.
 
 Designed with direct 1-to-1 fidelity to Diego Ongaro & John Ousterhout's seminal paper:  
 > **[*In Search of an Understandable Consensus Algorithm* (USENIX ATC '14)](https://raft.github.io/raft.pdf)**
 
 ---
 
-## 🏛️ System Architecture
+## 🌟 Key Features
 
-The core engine is decoupled into clear, modular abstractions without heavyweight external framework dependencies:
+- **Pure Async Python Engine**: Complete Raft implementation using native `asyncio`, asynchronous TCP sockets, and zero heavy external framework dependencies for the consensus core.
+- **Strict Raft Paper Fidelity**: Direct implementation of Figure 2 invariants (Randomized election timeouts, strict term precedence, majority quorums, log consistency checks, Section 5.4.2 older-term commit safety rule).
+- **Interactive Visualizer ("God Panel")**: Real-time canvas-based network topology, animated RPC packet traffic, live election countdown progress rings, log inspectors, and state machine viewers.
+- **Live Chaos & Fault Injection**:
+  - **Kill / Revive Nodes**: Dynamically crash nodes and observe election failovers and leader log backfilling.
+  - **Network Partitions**: Split the cluster into custom isolated subnets (e.g., $3/2$ split) to visualize split-brain immunity and uncommitted log branches.
+  - **Isolate Leader**: Isolate the active leader to witness graceful timeout-based term leadership handoffs.
+  - **Drop / Delay Packets**: Simulate high latency and lossy networks on the fly.
+- **Dynamic Node Addition**: Dynamically scale the cluster size in pairs (e.g., $5 \rightarrow 7$ nodes) while preserving odd-quorum majority consensus.
+- **Comprehensive Chaos Test Suite**: 34 unit, integration, and failure-injection tests covering multi-node cluster failovers, split-brain protection, and log consistency recovery.
+
+---
+
+## 🏛️ System Architecture
 
 ```mermaid
 flowchart TB
-    subgraph Client Layer
-        CLI[Client Command: SET / DEL]
+    subgraph Client / UI Layer
+        WebUI[Interactive Web Visualizer\nHTML5 Canvas + Real-Time WebSocket]
+        CLI[Client Command\nSET key=val / DEL key]
     end
 
-    subgraph Raft Node
-        RPC[RPCManager\nAsync TCP Server/Client\nNewline-Delimited JSON]
-        State[RaftState\nPersistent: term, voted_for, log\nVolatile: commit_index, last_applied]
-        SM[State Machine\nIn-Memory KV Store]
-        Node[RaftNode\nRole: Follower / Candidate / Leader\nTimers & Event Loops]
-        Telemetry[Telemetry Observers\non_state_change / on_rpc_event]
+    subgraph Monitor Server
+        FastAPI[FastAPI + WebSocket Hub\nmonitor.py :8000]
     end
 
+    subgraph Raft Cluster
+        subgraph Node N
+            RPC[RPCManager\nAsync TCP Framing\nNewline-Delimited JSON]
+            State[RaftState\nPersistent: term, voted_for, log\nVolatile: commit_index, last_applied]
+            SM[State Machine\nIn-Memory Key-Value Store]
+            Node[RaftNode\nRole: Follower / Candidate / Leader\nTimers & Event Loops]
+            Telemetry[Telemetry Observers\non_state_change / on_rpc_event]
+        end
+    end
+
+    WebUI <-->|WebSocket & REST API| FastAPI
     CLI -->|execute_command| Node
+    FastAPI <-->|Cluster Harness & Observer Events| Telemetry
     Node -->|apply committed entries| SM
     Node <-->|read / write| State
     Node <-->|send / receive RPCs| RPC
-    Node -->|dispatch events| Telemetry
-    Telemetry -.->|live stream| WebVisualizer[Phase 2: Web Visualizer / Monitor]
 ```
 
 ### Node State Transitions (Section 5.1 / Figure 4)
@@ -62,9 +82,41 @@ Every component maps directly to the rules and invariants defined in **Figure 2 
 
 ---
 
-## 🧪 Chaos Testing Suite (`tests/`)
+## 🚀 Quickstart
 
-The project includes a multi-node cluster test harness ([`tests/harness.py`](tests/harness.py)) simulating real-world network and process faults:
+### 1. Requirements & Installation
+
+- Python 3.10+
+- Install dependencies:
+
+```powershell
+pip install fastapi uvicorn websockets pytest
+```
+
+### 2. Launch the Interactive Web Visualizer
+
+Start the live cluster monitor server:
+
+```powershell
+python monitor.py
+```
+
+Open your browser and navigate to:
+```
+http://localhost:8000
+```
+
+From the dashboard, you can:
+- **Send Key-Value Writes**: Propose state machine transitions (e.g., `x = 10`, `user = alice`).
+- **Simulate Partitions**: Create 3/2 majority-minority splits or isolate the active leader.
+- **Inject Chaos**: Kill individual nodes, delay packets, or dynamically add nodes.
+- **Inspect Logs**: View uncommitted vs committed log entries side-by-side across all nodes in real time.
+
+---
+
+## 🧪 Automated Testing Suite (`tests/`)
+
+The test harness ([`tests/harness.py`](tests/harness.py)) deterministically executes and validates multi-node cluster scenarios:
 
 ```
 tests/
@@ -73,7 +125,14 @@ tests/
 ├── test_step3_election.py        # 5 tests: Quorums, heartbeats & re-elections
 ├── test_step4_replication.py     # 4 tests: Sequential client writes & KV state commits
 ├── test_step5_safety.py          # 4 tests: Election safety, backtracking & Section 5.4.2
-└── test_step6_chaos.py           # 3 tests: End-to-end chaos scenarios
+├── test_step6_chaos.py           # 3 tests: End-to-end chaos scenarios
+└── test_step8_monitor.py         # 1 test: Telemetry WebSocket and REST API verification
+```
+
+### Run All Tests
+
+```powershell
+python -m pytest tests/ -v
 ```
 
 ### Chaos Scenarios Verified:
@@ -83,27 +142,28 @@ tests/
 
 ---
 
-## 🚀 Quickstart
+## 📁 Repository Structure
 
-### 1. Requirements
-- Python 3.10+
-- `pytest`
-
-### 2. Run All Tests (33 Passing)
-```powershell
-python -m pytest tests/ -v
 ```
-
-### 3. Run Specific Chaos Scenarios
-```powershell
-python -m pytest tests/test_step6_chaos.py -v
+.
+├── raft/                  # Pure Python Raft consensus core
+│   ├── node.py            # Main RaftNode event loop, election & replication logic
+│   ├── state.py           # Persistent & volatile Raft state models
+│   ├── messages.py        # Typed dataclasses for RPC args & replies
+│   └── rpc.py             # Async TCP wire protocol manager
+├── frontend/              # Interactive Visualizer Dashboard
+│   ├── index.html         # Real-time UI layout & control panels
+│   ├── app.js             # Canvas rendering, WebSocket client & interactive controls
+│   └── style.css          # VS Code-inspired dark aesthetic design system
+├── tests/                 # Automated testing & chaos validation suite
+│   ├── harness.py         # Multi-node in-memory / local network test cluster
+│   └── test_step*.py      # Phase 1 to Phase 6 test benchmarks
+├── monitor.py             # FastAPI telemetry server & WebSocket hub
+└── README.md
 ```
 
 ---
 
-## 🔮 Phase 2 Roadmap: Interactive Web Visualizer
+## 📜 License
 
-- [x] **Step 1-6**: Core Raft Consensus & Chaos Bench (100% Tested)
-- [x] **Step 7**: Core Documentation & Paper Cross-Reference
-- [ ] **Step 8**: Telemetry Monitor Server (`monitor.py` - FastAPI + WebSocket + REST God Mode API)
-- [ ] **Step 9**: Interactive Frontend Dashboard (`frontend/` - Animated packet travel, live node states, and dynamic partition controls)
+MIT License. Feel free to use and experiment!
