@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed DBMS - Raft Simulation</title>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Montserrat:wght@900&family=Inconsolata:wght@400;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <div class="layout-wrapper">
+        <!-- Left Column: Whiteboard + Terminal + Blog -->
+        <div class="main-column">
+            <header class="top-bar">
+                <h1>Distributed DBMS / Raft Consensus Simulation</h1>
+            </header>
+
+            <main class="whiteboard" id="whiteboard">
+                <svg id="network-lines" width="100%" height="100%"></svg>
+                <div id="packets-container"></div>
+                <div id="node-container"></div>
+            </main>
+
+            <!-- Terminal Section Below Whiteboard -->
+            <section class="system-logs-container">
+                <h3>Live System Logs</h3>
+                <div id="system-logs" class="system-logs-content">
+                    <div class="log-line"><span class="log-level-info">[SYSTEM]</span> Starting Raft Monitor...</div>
+                </div>
+            </section>
+
+            <section class="blog-content">
+                <h2>What is Raft and why is it important?</h2>
+                <p>
+                    In distributed systems, ensuring that multiple machines agree on a shared state is one of the most
+                    fundamental challenges.
+                    Imagine a distributed database running on five different servers across the globe. If a client
+                    writes data to one server,
+                    how do we ensure the other four servers also record that data, even if network connections fail or
+                    servers crash?
+                    This is the problem of <strong>Distributed Consensus</strong>.
+                </p>
+                <h3>The Leader, the Followers, and the Candidates</h3>
+                <p>
+                    Raft solves this by establishing a strong <strong>Leader</strong>. Under normal operations, all
+                    nodes are <em>Followers</em>,
+                    except for one node that is the Leader. Clients send commands only to the Leader, which appends the
+                    commands to its log and
+                    broadcasts them to the Followers.
+                </p>
+                <p>
+                    If a Follower stops hearing from the Leader (via heartbeats), its "election timer" runs out, and it
+                    becomes a <em>Candidate</em>.
+                    It requests votes from the other nodes. If it gets a majority of votes, it becomes the new Leader!
+                </p>
+                <h3>Why Raft?</h3>
+                <p>
+                    Before Raft, the Paxos algorithm was the standard for consensus. However, Paxos is notoriously
+                    difficult to understand and
+                    implement correctly. Raft was designed specifically to be understandable. It separates the consensus
+                    problem into three
+                    independent subproblems:
+                </p>
+                <ul>
+                    <li><strong>Leader Election:</strong> A new leader must be chosen when an existing leader fails.
+                    </li>
+                    <li><strong>Log Replication:</strong> The leader must accept log entries from clients and replicate
+                        them across the cluster.</li>
+                    <li><strong>Safety:</strong> If any server has applied a particular log entry to its state machine,
+                        no other server may apply a different command for the same log index.</li>
+                </ul>
+            </section>
+        </div>
+
+        <!-- Right Column: Master Control -->
+        <aside class="sidebar-controls">
+            <h2 class="sidebar-title">Master Control</h2>
+
+            <!-- Selected Node Section -->
+            <div class="panel-section selected-node-panel" id="selected-node-panel">
+                <h3>Selected Node</h3>
+                <div id="sel-node-info" class="sel-node-info">
+                    <p><strong>ID:</strong> <span id="sel-node-id">None</span></p>
+                    <p><strong>Role:</strong> <span id="sel-node-role">-</span></p>
+                </div>
+                <div class="btn-group" style="margin-top: 10px;">
+                    <button id="btn-sel-kill" class="btn outline" disabled>Kill Node</button>
+                    <button id="btn-sel-revive" class="btn outline" disabled>Revive Node</button>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h3>Network Chaos</h3>
+                <div class="btn-group">
+                    <button id="btn-isolate" class="btn outline">Isolate Leader</button>
+                    <button id="btn-partition" class="btn outline">3/2 Partition</button>
+                    <button id="btn-heal" class="btn solid">Heal All Network</button>
+                </div>
+            </div>
+
+            <div class="panel-section">
+                <h3>Client Terminal</h3>
+                <div class="terminal-form">
+                    <input type="text" id="cmd-key" placeholder="Key (e.g. DATA)">
+                    <input type="text" id="cmd-val" placeholder="Value (e.g. 42)">
+                    <button id="btn-submit" class="btn solid dark">Send Command</button>
+                </div>
+            </div>
+
+            <div class="panel-section state-machine">
+                <h3>Global State (Leader)</h3>
+                <pre id="global-kv">{}</pre>
+            </div>
+
+            <div class="panel-section action-danger">
+                <button id="btn-add-node" class="btn solid dark" style="margin-bottom: 8px;">Add 2 Nodes</button>
+                <button id="btn-reset" class="btn danger">Reset Cluster</button>
+            </div>
+        </aside>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
