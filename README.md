@@ -1,6 +1,6 @@
 # Distributed Raft Consensus Engine & Real-Time Interactive Visualizer
 
-An explainable, production-grade implementation of the **Raft Distributed Consensus Algorithm** in pure asynchronous Python (`asyncio`), featuring an interactive real-time visualizer dashboard, dynamic node scaling, automated chaos engineering benchmarks, and live cluster failure injection.
+An explainable, rigorous, paper-faithful implementation of the **Raft Distributed Consensus Algorithm** in pure asynchronous Python (`asyncio`), featuring an interactive real-time visualizer dashboard, dynamic node scaling, automated chaos engineering benchmarks, and live cluster failure injection.
 
 Designed with direct 1-to-1 fidelity to Diego Ongaro & John Ousterhout's seminal paper:  
 > **[*In Search of an Understandable Consensus Algorithm* (USENIX ATC '14)](https://raft.github.io/raft.pdf)**

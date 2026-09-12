@@ -32,6 +32,7 @@ class RaftCluster:
         min_election_timeout: float = 0.300,
         max_election_timeout: float = 0.600,
         heartbeat_interval: float = 0.030,
+        wal_dir: Optional[str] = None,
     ) -> None:
         self.num_nodes = num_nodes
         self.min_election_timeout = min_election_timeout
@@ -42,6 +43,7 @@ class RaftCluster:
         self.nodes: Dict[str, RaftNode] = {}
         # Track persistent state across crashes and revivals
         self.persistent_states: Dict[str, RaftState] = {}
+        self.wal_dir = wal_dir
         self._is_running = False
 
     async def start(self, wait_for_leader: bool = True, timeout: float = 3.0) -> Optional[RaftNode]:
@@ -64,6 +66,7 @@ class RaftCluster:
                 min_election_timeout=self.min_election_timeout,
                 max_election_timeout=self.max_election_timeout,
                 heartbeat_interval=self.heartbeat_interval,
+                wal_dir=self.wal_dir,
             )
             self.nodes[nid] = node
 
@@ -131,6 +134,7 @@ class RaftCluster:
             min_election_timeout=self.min_election_timeout,
             max_election_timeout=self.max_election_timeout,
             heartbeat_interval=self.heartbeat_interval,
+            wal_dir=self.wal_dir,
         )
         self.nodes[node_id] = revived
 
@@ -193,6 +197,7 @@ class RaftCluster:
             min_election_timeout=self.min_election_timeout,
             max_election_timeout=self.max_election_timeout,
             heartbeat_interval=self.heartbeat_interval,
+            wal_dir=self.wal_dir,
         )
         self.nodes[new_id] = new_node
         

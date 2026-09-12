@@ -107,11 +107,14 @@ class ClusterMonitorController:
     async def start_cluster(self) -> None:
         """Boot the Raft cluster and register telemetry hooks on all nodes."""
         self._loop = asyncio.get_running_loop()
+        wal_dir = os.path.join(os.path.dirname(__file__), "server_wal")
+        os.makedirs(wal_dir, exist_ok=True)
         self.cluster = RaftCluster(
             num_nodes=self.num_nodes,
             min_election_timeout=0.300,
             max_election_timeout=0.600,
             heartbeat_interval=0.040,
+            wal_dir=wal_dir,
         )
         await self.cluster.start(wait_for_leader=False)
 

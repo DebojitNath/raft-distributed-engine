@@ -11,6 +11,7 @@ import asyncio
 import logging
 import random
 import time
+import os
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from raft.messages import (
@@ -21,6 +22,7 @@ from raft.messages import (
 )
 from raft.rpc import RPCManager
 from raft.state import LogEntry, NodeRole, RaftState
+from raft.wal import WALStorage
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +73,23 @@ class RaftNode:
         min_election_timeout: float = 0.150,
         max_election_timeout: float = 0.300,
         heartbeat_interval: float = 0.050,
+        wal_dir: Optional[str] = None,
     ) -> None:
         self.node_id = node_id
         self.peers = list(peers) if peers is not None else []
         self.state = state if state is not None else RaftState()
         self.role = NodeRole.FOLLOWER
         self.leader_id: Optional[str] = None
+
+        self.wal: Optional[WALStorage] = None
+        if wal_dir:
+            wal_path = os.path.join(wal_dir, f"{self.node_id}.wal")
+            self.wal = WALStorage(wal_path)
+            r_term, r_voted, r_log = self.wal.recover()
+            if r_term > 0 or r_voted or r_log:
+                self.state.current_term = r_term
+                self.state.voted_for = r_voted
+                self.state.log = r_log
 
         # Timing configurations (in seconds)
         self.min_election_timeout = min_election_timeout
@@ -183,6 +196,8 @@ class RaftNode:
         if term is not None and term > self.state.current_term:
             self.state.current_term = term
             self.state.voted_for = None
+            if self.wal:
+                self.wal.append_term_vote(self.state.current_term, self.state.voted_for)
 
         self.role = NodeRole.FOLLOWER
 
@@ -213,6 +228,8 @@ class RaftNode:
         """
         self.state.current_term += 1
         self.state.voted_for = self.node_id
+        if self.wal:
+            self.wal.append_term_vote(self.state.current_term, self.state.voted_for)
         self.role = NodeRole.CANDIDATE
         self.leader_id = None
         logger.info(
@@ -295,6 +312,8 @@ class RaftNode:
 
         if can_vote and is_log_up_to_date:
             self.state.voted_for = args.candidate_id
+            if self.wal:
+                self.wal.append_term_vote(self.state.current_term, self.state.voted_for)
             logger.info(
                 "Node %s granted vote to %s for Term %d",
                 self.node_id,
@@ -358,9 +377,15 @@ class RaftNode:
             if entry.index <= len(self.state.log):
                 if self.state.log[entry.index - 1].term != entry.term:
                     self.state.log = self.state.log[: entry.index - 1]
+                    if self.wal:
+                        self.wal.truncate_log(entry.index)
                     self.state.log.append(entry)
+                    if self.wal:
+                        self.wal.append_entry(entry)
             else:
                 self.state.log.append(entry)
+                if self.wal:
+                    self.wal.append_entry(entry)
 
         # 6. Rule: If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry) (Rule 5)
         if args.leader_commit > self.state.commit_index:
@@ -604,6 +629,8 @@ class RaftNode:
         new_index = self.state.last_log_index + 1
         entry = LogEntry(index=new_index, term=self.state.current_term, command=command)
         self.state.log.append(entry)
+        if self.wal:
+            self.wal.append_entry(entry)
         self.emit_state_change()
 
         # Standalone cluster (0 peers)
@@ -628,6 +655,88 @@ class RaftNode:
             await asyncio.sleep(0.02)
 
         return False
+
+    async def confirm_leadership(self, timeout: float = 2.0) -> bool:
+        """Confirm leadership by sending empty AppendEntries to a quorum and waiting for successes.
+        This is a lightweight version of broadcast_append_entries designed to confirm we aren't a stale leader.
+        """
+        if self.role != NodeRole.LEADER:
+            return False
+
+        if not self.peers:
+            return True
+
+        current_term = self.state.current_term
+        success_count = 1  # Self
+        quorum = (len(self.peers) + 1) // 2 + 1
+
+        async def ping_peer(peer_id: str) -> bool:
+            args = AppendEntriesArgs(
+                term=current_term,
+                leader_id=self.node_id,
+                prev_log_index=self.state.last_log_index,
+                prev_log_term=self.state.log[-1].term if self.state.log else 0,
+                entries=[],
+                leader_commit=self.state.commit_index,
+            )
+            reply = await self.rpc.send_append_entries(peer_id, args, timeout=0.5)
+            if not self._is_running or self.role != NodeRole.LEADER or self.state.current_term != current_term:
+                return False
+            if reply is None:
+                return False
+            if reply.term > current_term:
+                self.become_follower(term=reply.term)
+                return False
+            return reply.success
+
+        tasks = [ping_peer(p) for p in self.peers]
+        try:
+            for f in asyncio.as_completed(tasks, timeout=timeout):
+                if await f:
+                    success_count += 1
+                if success_count >= quorum:
+                    return True
+        except asyncio.TimeoutError:
+            pass
+        return False
+
+    async def linearizable_read(self, key: str, timeout: float = 2.0) -> Tuple[bool, Any]:
+        """Perform a ReadIndex linearizable read without writing a new log entry.
+        Returns (success, value).
+        """
+        if self.role != NodeRole.LEADER:
+            return False, None
+
+        # 1. Save current commit_index (ReadIndex)
+        read_index = self.state.commit_index
+
+        # 2. If the leader hasn't committed an entry from its current term yet, it cannot serve reads safely.
+        has_committed_current_term = any(
+            e.term == self.state.current_term for e in self.state.log[:read_index]
+        )
+        if not has_committed_current_term:
+            # Submit a no-op to force commit
+            await self.execute_command({"op": "NOOP"}, timeout=timeout)
+            read_index = self.state.commit_index
+
+        # 3. Confirm leadership with a quorum
+        is_leader = await self.confirm_leadership(timeout=timeout)
+        if not is_leader:
+            return False, None
+
+        # 4. Wait for local state machine to apply up to read_index
+        start_time = time.time()
+        while self.state.last_applied < read_index:
+            if time.time() - start_time > timeout:
+                return False, None
+            await asyncio.sleep(0.01)
+
+        # 5. Return value from local state machine
+        return True, self.state.kv_store.get(key)
+
+    def local_read(self, key: str) -> Any:
+        """Perform a local, potentially stale read from the state machine."""
+        return self.state.kv_store.get(key)
 
     # -------------------------------------------------------------------------
     # Server Lifecycle Management
@@ -659,4 +768,6 @@ class RaftNode:
             self._heartbeat_task = None
 
         await self.rpc.stop()
+        if self.wal:
+            self.wal.close()
         logger.info("RaftNode %s stopped", self.node_id)
