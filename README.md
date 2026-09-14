@@ -81,6 +81,7 @@ flowchart TB
 
 ### Node State Transitions (Section 5.1 / Figure 4)
 
+
 ```mermaid
 stateDiagram-v2
     [*] --> Follower: Boot
